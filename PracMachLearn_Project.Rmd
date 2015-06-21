@@ -1,0 +1,110 @@
+---
+title: "Classification of personal fitness device activity data for prediction"
+
+date: "Saturday, June 20, 2015"
+output: html_document
+---
+
+##Background
+Currently there are various fitness monitoring devices on the market including: *Jawbone*, *Nike Fuelband*, and *Fitbit*. These devices can collect a large amount of data about personal activity levels. These are leveraged by indivuals who wish to improve their health through finding patterns in thier activies. In the current work, we are going to use these data sets to train a random forest model in an effort to predict new data based on the data.
+
+
+```{r setoptions,echo=FALSE}
+library(knitr)
+opts_chunk$set(echo=TRUE)
+```
+
+###Data Loading and Examination 
+I am going to start by loading in the data and having a quick look at. I will also load in a bunch of useful libraries
+
+```{r loadpackages,cache=TRUE,results='hide'}
+
+library(caret)
+library(randomForest)
+library(corrplot)
+library(doParallel) #this will speed things up per the forums
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+```
+
+```{r loaddata,cache=TRUE,echo=TRUE}
+#we also want to make sure strings tha have nothing in them, as well as NA are considers NAs
+DataIn <- read.csv("pml-training.csv", na.strings = c("NA", ""))
+dim(DataIn)
+
+```
+
+We know that the first seven columns are not useful (they are ids, time stamps, etc...) so we will remove them. I will also remove columns that contain NA values. There are 52 variables left over.
+```{r CleanData,cache=TRUE}
+
+#This part takes out the first seven columns
+Data <- DataIn[,8:dim(DataIn)[2]] 
+#remove columns that have NAs
+Data <- Data[, colSums(is.na(Data)) == 0]
+```
+
+We next will perform a quick correlation matrix exploratory analysis. 
+
+```{r ExploreData,cache=TRUE,fig.height=10}
+#remove the classe variable since it isn't numeric
+Plot_corr <- cor(Data[, -dim(Data)[2]])
+corrplot(Plot_corr,col=rainbow(200))
+```
+
+The plot shows that there are regions of strong correlation such as the belt data at the upper right with the various data from the belt, and corrleation with arm data and belt data moving downward. Each set of measurements (i.e. all the belts, all the arms... etc..) have good correlation with themselves. This is seen moving down the diagonal, but they are the terms that are not exactly on the diagonal.
+
+##Modeling with Random Forests
+
+I am going to split the *Data* data frame into the training and test sets.
+```{r CreateTestTrain,cache=TRUE}
+
+#just like we did in class. I'm going to put break it up into 2/3 training 1/3 test 
+set.seed(12341)
+inTrain <- createDataPartition(y=Data$classe, p=0.66, list=FALSE)
+DataTraining <- Data[inTrain, ]; DataTesting <- Data[-inTrain, ]
+nrow(DataTraining)
+nrow(DataTesting)
+```
+
+Now let's train our model!
+```{r TrainModel,cache=TRUE}
+set.seed(12341)
+#I'm going to use a 6 fold cross validation
+#using randomForest is faster as per the discussion forums
+modFit <- randomForest(classe~ .,data=DataTraining,method="rf",prox=TRUE, trControl=trainControl(method = "cv", number = 6),ntree=150)
+#I played around with tree to get a good test set accuracy
+```
+
+Now let's see how it does on the Training set
+```{r TestModelTraining,cache=TRUE}
+set.seed(12341)
+#I'm going to use a 6 fold cross validation
+#using randomForest is faster as per the discussion forums
+TrainingPredict <- predict(modFit, DataTraining, type = "class")
+confusionMatrix(DataTraining$classe,TrainingPredict)
+```
+
+We can perfect fitting of the training set, which makes sense, although we could be overfitting.
+
+Next, let's see how this performs on the the test set 
+```{r TestModelTesting,cache=TRUE}
+
+#I'm going to use a 6 fold cross validation
+#using randomForest is faster as per the discussion forums
+TestingPredict <- predict(modFit, DataTesting, type = "class")
+confusionMatrix(DataTesting$classe,TestingPredict)
+```
+We get out of sample error of ~ 0.5% (1-0.995) for all classes. This is very good accuracy for our test set. 
+
+Let's run this on our final data which I will submit. (The file creation script is not included, but is the one shown in the course website.)
+```{r FinalTest,cache=TRUE}
+
+#read in data
+DataTest <- read.csv("pml-testing.csv", na.strings = c("NA", ""))
+#subset vector for subsetting final test data
+vect<-names(DataTest) %in% names( DataTesting )
+#index based on the names
+DataFinalTest <- DataTest[,vect]
+#run the prediction
+FinalDataPrediction <- predict(modFit, DataFinalTest)
+```
